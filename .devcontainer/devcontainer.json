@@ -1,14 +1,9 @@
 {
     "name": "Rust",
-    "image": "mcr.microsoft.com/devcontainers/rust:0-1-bullseye",
+    "image": "mcr.microsoft.com/devcontainers/rust:1",
     "features": {
         "ghcr.io/devcontainers/features/docker-in-docker:2": {}
     },
-    "portsAttributes": {
-        "8080": {
-            "label": "redlib",
-            "onAutoForward": "notify"
-        }
-    },
+    "forwardPorts": [8080],
     "postCreateCommand": "cargo build"
 }
