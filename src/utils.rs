@@ -16,6 +16,7 @@ use std::env;
 use std::str::FromStr;
 use time::{macros::format_description, Duration, OffsetDateTime};
 use url::Url;
+use serde::{Serialize, Deserialize};
 
 /// Write a message to stderr on debug mode. This function is a no-op on
 /// release code.
@@ -43,6 +44,7 @@ pub enum ResourceType {
 }
 
 // Post flair with content, background color and foreground color
+#[derive(Serialize, Deserialize)]
 pub struct Flair {
 	pub flair_parts: Vec<FlairPart>,
 	pub text: String,
@@ -51,6 +53,7 @@ pub struct Flair {
 }
 
 // Part of flair, either emoji or text
+#[derive(Serialize, Deserialize)]
 #[derive(Clone)]
 pub struct FlairPart {
 	pub flair_part_type: String,
@@ -92,13 +95,13 @@ impl FlairPart {
 		}
 	}
 }
-
+#[derive(Serialize, Deserialize)]
 pub struct Author {
 	pub name: String,
 	pub flair: Flair,
 	pub distinguished: String,
 }
-
+#[derive(Serialize, Deserialize)]
 pub struct Poll {
 	pub poll_options: Vec<PollOption>,
 	pub voting_end_timestamp: (String, String),
@@ -125,7 +128,7 @@ impl Poll {
 		self.poll_options.iter().filter_map(|o| o.vote_count).max().unwrap_or(0)
 	}
 }
-
+#[derive(Serialize, Deserialize)]
 pub struct PollOption {
 	pub id: u64,
 	pub text: String,
@@ -155,12 +158,14 @@ impl PollOption {
 }
 
 // Post flags with nsfw and stickied
+#[derive(Serialize, Deserialize)]
 pub struct Flags {
 	pub nsfw: bool,
 	pub stickied: bool,
 }
 
 #[derive(Debug)]
+#[derive(Serialize, Deserialize)]
 pub struct Media {
 	pub url: String,
 	pub alt_url: String,
@@ -248,7 +253,7 @@ impl Media {
 		)
 	}
 }
-
+#[derive(Serialize, Deserialize)]
 pub struct GalleryMedia {
 	pub url: String,
 	pub width: i64,
@@ -289,6 +294,7 @@ impl GalleryMedia {
 }
 
 // Post containing content, metadata and media
+#[derive(Serialize, Deserialize)]
 pub struct Post {
 	pub id: String,
 	pub title: String,
@@ -447,6 +453,7 @@ pub struct Comment {
 	pub prefs: Preferences,
 }
 
+#[derive(Serialize, Deserialize)]
 #[derive(Default, Clone)]
 pub struct Award {
 	pub name: String,
@@ -461,6 +468,7 @@ impl std::fmt::Display for Award {
 	}
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct Awards(pub Vec<Award>);
 
 impl std::ops::Deref for Awards {
@@ -542,6 +550,7 @@ pub struct User {
 	pub nsfw: bool,
 }
 
+#[derive(Serialize, Deserialize)]
 #[derive(Default)]
 // Subreddit struct containing metadata about community
 pub struct Subreddit {
@@ -566,7 +575,7 @@ pub struct Params {
 	pub after: Option<String>,
 	pub before: Option<String>,
 }
-
+#[derive(Serialize, Deserialize)]
 #[derive(Default)]
 pub struct Preferences {
 	pub available_themes: Vec<String>,

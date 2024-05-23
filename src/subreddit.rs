@@ -5,11 +5,13 @@ use crate::utils::{
 use crate::{client::json, server::ResponseExt, RequestExt};
 use askama::Template;
 use cookie::Cookie;
-use hyper::{Body, Request, Response};
+use hyper::{header, Body, Request, Response, StatusCode};
 
 use time::{Duration, OffsetDateTime};
+use serde::{Serialize, Deserialize};
 
 // STRUCTS
+#[derive(Serialize, Deserialize)]
 #[derive(Template)]
 #[template(path = "subreddit.html")]
 struct SubredditTemplate {
@@ -149,6 +151,137 @@ pub async fn community(req: Request<Body>) -> Result<Response<Body>, String> {
 					all_posts_hidden_nsfw,
 					no_posts,
 				}))
+			}
+			Err(msg) => match msg.as_str() {
+				"quarantined" | "gated" => Ok(quarantine(&req, sub_name, &msg)),
+				"private" => error(req, &format!("r/{sub_name} is a private community")).await,
+				"banned" => error(req, &format!("r/{sub_name} has been banned from Reddit")).await,
+				_ => error(req, &msg).await,
+			},
+		}
+	}
+}
+
+pub async fn community_api(req: Request<Body>) -> Result<Response<Body>, String> {
+	// Build Reddit API path
+	let root = req.uri().path() == "/";
+	let subscribed = setting(&req, "subscriptions");
+	let front_page = setting(&req, "front_page");
+	let post_sort = req.cookie("post_sort").map_or_else(|| "hot".to_string(), |c| c.value().to_string());
+	let sort = req.param("sort").unwrap_or_else(|| req.param("id").unwrap_or(post_sort));
+
+	let sub_name = req.param("sub").unwrap_or(if front_page == "default" || front_page.is_empty() {
+		if subscribed.is_empty() {
+			"popular".to_string()
+		} else {
+			subscribed.clone()
+		}
+	} else {
+		front_page.clone()
+	});
+	let quarantined = can_access_quarantine(&req, &sub_name) || root;
+
+	// Handle random subreddits
+	if let Ok(random) = catch_random(&sub_name, "").await {
+		return Ok(random);
+	}
+
+	if req.param("sub").is_some() && sub_name.starts_with("u_") {
+		return Ok(redirect(&["/user/", &sub_name[2..]].concat()));
+	}
+
+	// Request subreddit metadata
+	let sub = if !sub_name.contains('+') && sub_name != subscribed && sub_name != "popular" && sub_name != "all" {
+		// Regular subreddit
+		subreddit(&sub_name, quarantined).await.unwrap_or_default()
+	} else if sub_name == subscribed {
+		// Subscription feed
+		if req.uri().path().starts_with("/r/") {
+			subreddit(&sub_name, quarantined).await.unwrap_or_default()
+		} else {
+			Subreddit::default()
+		}
+	} else {
+		// Multireddit, all, popular
+		Subreddit {
+			name: sub_name.clone(),
+			..Subreddit::default()
+		}
+	};
+
+	let req_url = req.uri().to_string();
+	// Return landing page if this post if this is NSFW community but the user
+	// has disabled the display of NSFW content or if the instance is SFW-only.
+	if sub.nsfw && crate::utils::should_be_nsfw_gated(&req, &req_url) {
+		return Ok(nsfw_landing(req, req_url).await.unwrap_or_default());
+	}
+
+	let mut params = String::from("&raw_json=1");
+	if sub_name == "popular" {
+		params.push_str("&geo_filter=GLOBAL");
+	}
+
+	let path = format!("/r/{sub_name}/{sort}.json?{}{params}", req.uri().query().unwrap_or_default());
+	let url = String::from(req.uri().path_and_query().map_or("", |val| val.as_str()));
+	let redirect_url = url[1..].replace('?', "%3F").replace('&', "%26").replace('+', "%2B");
+	let filters = get_filters(&req);
+
+	// If all requested subs are filtered, we don't need to fetch posts.
+	if sub_name.split('+').all(|s| filters.contains(s)) {
+		Ok(template(&SubredditTemplate {
+			sub,
+			posts: Vec::new(),
+			sort: (sort, param(&path, "t").unwrap_or_default()),
+			ends: (param(&path, "after").unwrap_or_default(), String::new()),
+			prefs: Preferences::new(&req),
+			url,
+			redirect_url,
+			is_filtered: true,
+			all_posts_filtered: false,
+			all_posts_hidden_nsfw: false,
+			no_posts: false,
+		}))
+	} else {
+		match Post::fetch(&path, quarantined).await {
+			Ok((mut posts, after)) => {
+				let (_, all_posts_filtered) = filter_posts(&mut posts, &filters);
+				let no_posts = posts.is_empty();
+				let all_posts_hidden_nsfw = !no_posts && (posts.iter().all(|p| p.flags.nsfw) && setting(&req, "show_nsfw") != "on");
+				// Ok(template(&SubredditTemplate {
+				// 	sub,
+				// 	posts,
+				// 	sort: (sort, param(&path, "t").unwrap_or_default()),
+				// 	ends: (param(&path, "after").unwrap_or_default(), after),
+				// 	prefs: Preferences::new(&req),
+				// 	url,
+				// 	redirect_url,
+				// 	is_filtered: false,
+				// 	all_posts_filtered,
+				// 	all_posts_hidden_nsfw,
+				// 	no_posts,
+				// }))
+				let msg: String = "".to_string();
+				let res = match serde_json::to_string(&SubredditTemplate {
+					sub,
+					posts,
+					sort: (sort, param(&path, "t").unwrap_or_default()),
+					ends: (param(&path, "after").unwrap_or_default(), after),
+					prefs: Preferences::new(&req),
+					url,
+					redirect_url,
+					is_filtered: false,
+					all_posts_filtered,
+					all_posts_hidden_nsfw,
+					no_posts,
+				}) {
+					
+					Ok(json) => Response::builder()
+						.header(header::CONTENT_TYPE, "application/json")
+						.body(json.into())
+						.unwrap(),
+					Err(_) => Response::builder().body(msg.into()).unwrap(),
+				};
+				Ok(res)
 			}
 			Err(msg) => match msg.as_str() {
 				"quarantined" | "gated" => Ok(quarantine(&req, sub_name, &msg)),

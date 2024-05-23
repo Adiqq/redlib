@@ -272,6 +272,10 @@ async fn main() {
 		.post(|r| subreddit::add_quarantine_exception(r).boxed());
 
 	app
+		.at("/api/r/:sub")
+		.get(|r| subreddit::community_api(r).boxed());
+
+	app
 		.at("/r/u_:name")
 		.get(|r| async move { Ok(redirect(&format!("/user/{}", r.param("name").unwrap_or_default()))) }.boxed());
 
